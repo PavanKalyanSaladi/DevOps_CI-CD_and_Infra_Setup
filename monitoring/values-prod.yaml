@@ -1,0 +1,29 @@
+grafana:
+  enabled: true
+  adminPassword: admin
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    path: /
+    pathType: Prefix
+    hosts:
+      - grafana.prod.cybersapient.dev
+    annotations:
+      kubernetes.io/ingress.class: alb
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+
+prometheus:
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    path: /
+    pathType: Prefix
+    hosts:
+      - prometheus.prod.cybersapient.dev
+    annotations:
+      kubernetes.io/ingress.class: alb
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
