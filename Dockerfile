@@ -5,6 +5,7 @@ WORKDIR /app
 
 COPY app/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade setuptools==78.1.1
 COPY app/ ./
 
 EXPOSE 5000
