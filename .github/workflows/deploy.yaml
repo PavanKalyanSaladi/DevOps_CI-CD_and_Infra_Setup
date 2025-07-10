@@ -1,0 +1,98 @@
+name: CI/CD Pipeline with Monitoring & DNS
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+
+env:
+  AWS_REGION: ${{ secrets.REGION }}
+  CLUSTER_NAME: ${{ secrets.CLUSTER_NAME }}
+  ECR_REPO_URL: ${{ secrets.ECR_REPO_URL }}
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO_URL
+
+      - name: Set Image Tag & Env
+        id: vars
+        run: |
+          BRANCH_NAME=${GITHUB_REF##*/}
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            TAG="prod-${GITHUB_SHA::7}"
+            VALUES_FILE="k8s/values/prod-values.yaml"
+            RELEASE="flask-prod"
+            MONITORING_VALUES="monitoring/values-prod.yaml"
+          else
+            TAG="stag-${GITHUB_SHA::7}"
+            VALUES_FILE="k8s/values/staging-values.yaml"
+            RELEASE="flask-staging"
+            MONITORING_VALUES="monitoring/values-staging.yaml"
+          fi
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "VALUES_FILE=$VALUES_FILE" >> $GITHUB_ENV
+          echo "RELEASE=$RELEASE" >> $GITHUB_ENV
+          echo "MONITORING_VALUES=$MONITORING_VALUES" >> $GITHUB_ENV
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t $ECR_REPO_URL:$TAG .
+          docker push $ECR_REPO_URL:$TAG
+
+      - name: Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "$ECR_REPO_URL:$TAG"
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
+
+      - name: Deploy App via Helm
+        run: |
+          helm upgrade --install $RELEASE ./k8s -f $VALUES_FILE --set image.repository=$ECR_REPO_URL --set image.tag=$TAG
+
+      - name: Deploy Monitoring Stack
+        run: |
+          BRANCH_NAME=${GITHUB_REF##*/}
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            VALUES_FILE="monitoring/values-prod.yaml"
+          else
+            VALUES_FILE="monitoring/values-staging.yaml"
+          fi
+
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+
+          helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+            -f $VALUES_FILE \
+            --namespace monitoring \
+            --create-namespace
