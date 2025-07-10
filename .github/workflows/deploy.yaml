@@ -57,6 +57,11 @@ jobs:
         run: |
           docker build -t $ECR_REPO_URL:$TAG .
           docker push $ECR_REPO_URL:$TAG
+      
+      - name: Debug env values
+        run: |
+          echo "TAG = $TAG"
+          echo "ECR_REPO_URL = $ECR_REPO_URL"
 
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
